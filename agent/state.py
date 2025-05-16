@@ -26,4 +26,4 @@ class AgentState(TypedDict, total=False):
     is_result_sufficient: bool  # Whether search results are sufficient
     needs_web_search: bool  # Whether web search is needed
     web_search_query: str  # Web search query
-    web_search_results:List[Any]  # Results from web search
+    web_search_results:Dict[str,Any]  # Results from web search

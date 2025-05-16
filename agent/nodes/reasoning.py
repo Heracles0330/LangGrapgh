@@ -1,4 +1,3 @@
-
 from langchain.prompts import ChatPromptTemplate
 from pydantic import BaseModel
 from agent.state import AgentState
@@ -87,7 +86,9 @@ In this phase:
 - Generate detailed MongoDB aggregation pipeline and Pinecone queries to answer the user's question based on the example cheese data schema. The MongoDB query is for detailed information about the product. The Pinecone query is for a conceptual search. If the pinecone query is not necessary, make them empty string "".As possible as you can, don't user the pinecone query.
 - As default the normal price is the each price and if there is no requirement about the data fields, only search for the name,brand,department(category),price,sku,href,images.
 - And the department is also the category of the cheese.
-- Always don't search the _id field and sort by the price.
+- Always don't search the _id field and sort by the price.(set the _id project to 0 and sort by the price)
+- If the user asks about the previous conversation, identify the product sku and use the sku to search the database because the sku is the unique identifier of the product.
+                                                    
 ### PHASE 2: If search has been performed (is_searched = true)
 Analyze the search results to determine if they are sufficient to answer the user's question.
 In this phase:
@@ -105,6 +106,18 @@ Respond with a JSON object in this format:
 }}
 
 For MongoDB, use proper query operators like $eq, $gt, $lt, $in, $regex, etc. For complex queries, use aggregation pipeline.
+
+**VERY IMPORTANT for `mongo_query`:**
+- The entire `mongo_query` string MUST be a valid JSON array of pipeline stages.
+- ALL keys (e.g., "$match", "name", "$regex") and ALL string values within the pipeline MUST be enclosed in **double quotes**.
+- Example of a correctly formatted `mongo_query` string:
+  `"[{{\"$match\": {{\"brand\": \"Schreiber\"}}}}, {{\"$project\": {{\"name\": 1, \"brand\": 1, \"prices.Each\": 1, \"_id\": 0}}}}, {{\"$sort\": {{\"prices.Each\": 1}}}} ]"`
+- Do NOT use single quotes for keys or string values.
+- Ensure correct escaping if your generated query string itself needs to be embedded in the final JSON output (though the Pydantic model should handle this if the string content is correct).
+
+Avoid syntax like `{{'$match': {{'brand': 'Schreiber'}}}}` as this is invalid.
+Only use double quotes: `[{{\"$match\": {{\"brand\": \"Schreiber\"}}}}]`
+
 """)
 
 
