@@ -95,7 +95,7 @@ Analyze the search results to determine if they are sufficient to answer the use
 In this phase:
 - If results are sufficient: Set is_result_sufficient = true, needs_web_search = false
 - If results are NOT sufficient: Set is_result_sufficient = false, needs_web_search = true, and generate an appropriate web_search_query
-
+But I think web search is so slow,so if there is some results, don't suggest web search.
 Respond with a JSON object in this format:
 {{
   "thought": "Your step-by-step reasoning about the query and search strategy",
@@ -105,9 +105,6 @@ Respond with a JSON object in this format:
   "pinecone_query": "Search term for Pinecone",
   "web_search_query": "Query for web search if needed"
 }}
-**Important:**
-The thought is the reasoning of the user's query and the search strategy. And I need to show them as the reasoning of the agent using streamlit. So like the ChatGPT, the reasoning steps must be logical and simple and easy to understand. So not the full sentence, the steps must be short and concise. So in short make them to display in wonderful and perfect interface in streamlit.
-
 For MongoDB, use proper query operators like $eq, $gt, $lt, $in, $regex, etc. For complex queries, use aggregation pipeline.
 
 **VERY IMPORTANT for `mongo_query`:**

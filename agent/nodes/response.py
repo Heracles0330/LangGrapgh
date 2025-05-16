@@ -31,6 +31,8 @@ Information from Web Search (e.g., articles, reviews, general knowledge, images)
 7.  Do not make up information. Only use what's provided in the search results.
 8.  If no relevant information is found in either database or web searches, inform the user politely that you couldn't find the information.
 9.  If there are so many products, don't show all of them. Show only the first 10 products and the total number of products.
+Always say the total number of results in the response.
+And please show the products in the streamlit markdown format. And show the products in the table format.
 Begin your response:
 """
 

@@ -35,6 +35,8 @@ if "active_interrupt_info" not in st.session_state: # To store details of an act
     st.session_state.active_interrupt_info = None
 if "last_displayed_plan" not in st.session_state: # To track the last displayed plan
     st.session_state.last_displayed_plan = []
+if "last_displayed_final_response" not in st.session_state: # To track the last final_response displayed
+    st.session_state.last_displayed_final_response = None
 
 
 # --- Sidebar ---
@@ -62,7 +64,8 @@ with st.sidebar:
         st.session_state.current_thoughts_displayed = set()
         st.session_state.last_event_messages_count = 0
         st.session_state.active_interrupt_info = None
-        st.session_state.last_displayed_plan = [] # Reset on clear
+        st.session_state.last_displayed_plan = [] 
+        st.session_state.last_displayed_final_response = None # Reset on clear
         st.rerun()
 
 # --- Main Chat Interface ---
@@ -129,8 +132,7 @@ if prompt: # This will be true if chat_input has value OR if a button set the pr
     # The "Resuming with input..." thought will indicate what's being sent.
 
     st.session_state.current_thoughts_displayed = set() 
-    st.session_state.last_event_messages_count = 0 
-    # Don't reset last_displayed_plan here, only if it changes in the stream or on full clear.
+    st.session_state.last_displayed_final_response = None # Reset for new turn to ensure new final_response is shown
 
     with st.spinner("Cheese bot is thinking..."):
         try:
@@ -246,18 +248,21 @@ if prompt: # This will be true if chat_input has value OR if a button set the pr
 
 
                     # --- Display New AIMessages ---
-                    # event_state["messages"] contains List[BaseMessage]
-                    current_graph_messages = event_state.get("messages", [])
-                    new_messages_from_event = current_graph_messages[st.session_state.last_event_messages_count:]
-                    
-                    for msg_from_graph in new_messages_from_event:
-                        if isinstance(msg_from_graph, AIMessage):
-                            st.session_state.messages.append({"role": "assistant", "content": msg_from_graph.content})
-                        # HumanMessages are added when user types, SystemMessages could be handled if needed
-                    st.session_state.last_event_messages_count = len(current_graph_messages)
+                    # This section is now REMOVED as per user request to use final_response only.
+                    # current_graph_messages = event_state.get("messages", [])
+                    # new_messages_from_event = current_graph_messages[st.session_state.last_event_messages_count:]
+                    # 
+                    # for msg_from_graph in new_messages_from_event:
+                    #     if isinstance(msg_from_graph, AIMessage):
+                    #         st.session_state.messages.append({"role": "assistant", "content": msg_from_graph.content})
+                    # st.session_state.last_event_messages_count = len(current_graph_messages) # This still needs to be updated for context
+
+                    # Update last_event_messages_count for agent's context history tracking, even if not displaying AIMessages from here
+                    current_graph_messages_for_history = event_state.get("messages", [])
+                    st.session_state.last_event_messages_count = len(current_graph_messages_for_history)
+
 
                     # --- Display Clarification Info (if not leading to an immediate interrupt shown above) ---
-                    # This might be redundant if all clarifications cause an interrupt that's already handled.
                     if event_state.get("needs_clarification") and not st.session_state.interrupted_state:
                         reason = event_state.get("reason","")
                         question = event_state.get("suggested_clarifying_question","")
@@ -273,12 +278,12 @@ if prompt: # This will be true if chat_input has value OR if a button set the pr
                                 # Display as a thought or a distinct system message
                                 st.session_state.messages.append({"role": "reasoning_thought", "content": " ".join(clar_text_parts)})
                     
-                    # Final response check from state (if your agent populates this field)
+                    # --- Display AI Message using final_response ---
                     final_response_from_state = event_state.get("final_response")
-                    if final_response_from_state and isinstance(final_response_from_state, str):
-                        # Ensure this isn't a duplicate of the last AIMessage
-                        if not st.session_state.messages or st.session_state.messages[-1].get("content") != final_response_from_state or st.session_state.messages[-1].get("role") != "assistant":
-                            st.session_state.messages.append({"role": "assistant", "content": final_response_from_state})
+                    if final_response_from_state and isinstance(final_response_from_state, str) and \
+                       final_response_from_state != st.session_state.last_displayed_final_response:
+                        st.session_state.messages.append({"role": "assistant", "content": final_response_from_state})
+                        st.session_state.last_displayed_final_response = final_response_from_state
 
 
         except Exception as e:
