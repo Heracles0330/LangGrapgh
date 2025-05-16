@@ -67,7 +67,7 @@ def mongo_search(state: AgentState) -> AgentState:
     # Get the MongoDB query from state
     mongo_query = state.get("mongo_query", "")
     
-    if not mongo_query:
+    if not mongo_query or mongo_query == "":
         # If no MongoDB query is provided, return empty results
         return
     
