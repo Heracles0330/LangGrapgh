@@ -58,5 +58,6 @@ def response(state: AgentState) -> AgentState:
 
     ai_response = llm.invoke(prompt)
     print(ai_response.content)
+    final_response = ai_response.content
     messages = state["messages"] + [AIMessage(content=ai_response.content)]
-    return {"messages":messages}
+    return {"messages":messages, "final_response":final_response}

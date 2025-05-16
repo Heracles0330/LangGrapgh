@@ -87,6 +87,7 @@ In this phase:
 - As default the normal price is the each price and if there is no requirement about the data fields, only search for the name,brand,department(category),price,sku,href,images.
 - And the department is also the category of the cheese.
 - Always don't search the _id field and sort by the price.(set the _id project to 0 and sort by the price)
+- Always don't search the _id field and sort by the price.(set the _id project to 0 and sort by the price)
 - If the user asks about the previous conversation, identify the product sku and use the sku to search the database because the sku is the unique identifier of the product.
                                                     
 ### PHASE 2: If search has been performed (is_searched = true)
@@ -104,10 +105,13 @@ Respond with a JSON object in this format:
   "pinecone_query": "Search term for Pinecone",
   "web_search_query": "Query for web search if needed"
 }}
+**Important:**
+The thought is the reasoning of the user's query and the search strategy. And I need to show them as the reasoning of the agent using streamlit. So like the ChatGPT, the reasoning steps must be logical and simple and easy to understand. So not the full sentence, the steps must be short and concise. So in short make them to display in wonderful and perfect interface in streamlit.
 
 For MongoDB, use proper query operators like $eq, $gt, $lt, $in, $regex, etc. For complex queries, use aggregation pipeline.
 
 **VERY IMPORTANT for `mongo_query`:**
+- Always don't search the _id field and sort by the price.(set the _id project to 0 and sort by the price)
 - The entire `mongo_query` string MUST be a valid JSON array of pipeline stages.
 - ALL keys (e.g., "$match", "name", "$regex") and ALL string values within the pipeline MUST be enclosed in **double quotes**.
 - Example of a correctly formatted `mongo_query` string:
