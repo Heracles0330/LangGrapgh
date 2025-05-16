@@ -7,7 +7,7 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
-llm = init_chat_model("gpt-4o-mini",openai_api_key=os.getenv("OPENAI_API_KEY"))
+llm = init_chat_model("gpt-4.1",openai_api_key=os.getenv("OPENAI_API_KEY"))
 class LLMOutput(BaseModel):
     thought: str
     is_result_sufficient: bool

@@ -231,13 +231,13 @@ if prompt: # This will be true if chat_input has value OR if a button set the pr
                         break # Stop processing further events on interrupt
 
                     # --- Display Agent Thoughts (List[str]) ---
-                    agent_thoughts = event_state.get("thought", []) 
-                    if agent_thoughts:
-                        # Display only the latest new thought to avoid clutter if thoughts are cumulative
-                        latest_thought = agent_thoughts[-1] if agent_thoughts else None
-                        if latest_thought and latest_thought not in st.session_state.current_thoughts_displayed:
-                            st.session_state.messages.append({"role": "reasoning_thought", "content": latest_thought})
-                            st.session_state.current_thoughts_displayed.add(latest_thought)
+                    agent_thoughts_from_event = event_state.get("thought", []) 
+                    if agent_thoughts_from_event:
+                        for thought_content in agent_thoughts_from_event:
+                            # Display a thought if it's new for this turn
+                            if thought_content and thought_content not in st.session_state.current_thoughts_displayed:
+                                st.session_state.messages.append({"role": "reasoning_thought", "content": thought_content})
+                                st.session_state.current_thoughts_displayed.add(thought_content)
 
                     # --- Display Agent Plan (List[str]) ---
                     agent_plan = event_state.get("plan", [])

@@ -25,39 +25,16 @@ History: {history}
 
 First, understand the query in the context of the history and regenerate the complete query if necessary.
 
-Your database ONLY contains these specific fields about cheese products:
-- name: Product name
-- brand: Brand name
-- department: Cheese category
-- weights: Available weights
-- prices: Price information
-- pricePer: Price per unit
-- sku: Product ID
-- discount: Any discount information
-- popularityOrder: Popularity ranking
-- priceOrder: Price ranking
-- itemCounts, dimensions, images, relateds, empty, href: Other product details
 
-Information NOT in the database (and may require a web search by a later component) includes:
-- Country of origin or nationality information (French, Italian, etc.)
-- Nutritional information or ingredients
-- Flavor profiles or tasting notes
-- Production methods or aging information
-- Historical information about cheese
-- Recipes or cooking recommendations
-- Subjective opinions or general cheese knowledge not tied to specific product inventory.
 
-A query `needs_clarification` is true and you should provide a `suggested_clarifying_question` ONLY IF:
+you should provide clarification ONLY IF:
 1.  It's a simple greeting (e.g., "hello", "how are you?"). In this case, respond politely and ask how you can assist with cheese.
 2.  It's completely unrelated to cheese, our products, or food/shopping in general (e.g., "what's the capital of France?", "tell me about cars"). In this case, politely state you can only help with cheese-related queries.
-3.  It's excessively vague and provides no clear intent for the chatbot to act upon (e.g., "info", "do something", "help"). In this case, ask for more specifics about what they are looking for regarding cheese or our products.
-
-For all other queries, including general questions about cheese types, origins, recipes, or pairings not in the database, set `needs_clarification` to `false`. These queries are considered understandable, and a downstream 'reasoning' component will decide if a database search or web search is appropriate.
 
 Respond with a JSON object in this exact format:
 {{
   "needs_clarification": true/false,
-  "reason": "Brief explanation for your decision. If false, indicate why it can proceed (e.g., 'Query is specific to database fields.', 'Query is a general cheese question for web search.').",
+  "reason": "Brief explanation for your decision. If false, indicate why it can proceed.",
   "suggested_clarifying_question": "question (only if needs_clarification is true, otherwise empty string)"
 }}
 
