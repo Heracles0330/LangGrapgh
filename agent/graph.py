@@ -54,7 +54,8 @@ def create_agent_graph():
                 # We'll let the interrupt in the reasoning node handle the web search question
                 return "web_search"
             else:
-                return "response"
+                return "search"
+        
         # If this is the first run (before search), go to search
         return "search"
     
