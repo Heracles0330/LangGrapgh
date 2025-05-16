@@ -13,3 +13,4 @@ altair
 plotly
 langchain-tavily
 IPython
+langchain-openai
