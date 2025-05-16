@@ -37,6 +37,8 @@ if "last_displayed_plan" not in st.session_state: # To track the last displayed 
     st.session_state.last_displayed_plan = []
 if "last_displayed_final_response" not in st.session_state: # To track the last final_response displayed
     st.session_state.last_displayed_final_response = None
+if "last_displayed_mongo_query" not in st.session_state: # To track the last mongo_query displayed
+    st.session_state.last_displayed_mongo_query = None
 
 
 # --- Sidebar ---
@@ -65,7 +67,8 @@ with st.sidebar:
         st.session_state.last_event_messages_count = 0
         st.session_state.active_interrupt_info = None
         st.session_state.last_displayed_plan = [] 
-        st.session_state.last_displayed_final_response = None # Reset on clear
+        st.session_state.last_displayed_final_response = None 
+        st.session_state.last_displayed_mongo_query = None # Reset on clear
         st.rerun()
 
 # --- Main Chat Interface ---
@@ -132,7 +135,9 @@ if prompt: # This will be true if chat_input has value OR if a button set the pr
     # The "Resuming with input..." thought will indicate what's being sent.
 
     st.session_state.current_thoughts_displayed = set() 
-    st.session_state.last_displayed_final_response = None # Reset for new turn to ensure new final_response is shown
+    st.session_state.last_displayed_final_response = None 
+    st.session_state.last_displayed_mongo_query = None # Reset for new turn
+    st.session_state.last_displayed_plan = [] # Reset plan for new turn to allow re-display if it's the same
 
     with st.spinner("Cheese bot is thinking..."):
         try:
@@ -245,19 +250,18 @@ if prompt: # This will be true if chat_input has value OR if a button set the pr
                        plan_text = "📝 **Devising a plan:**\n" + "\n".join([f"  - {step}" for step in agent_plan])
                        st.session_state.messages.append({"role": "reasoning_thought", "content": plan_text})
                        st.session_state.last_displayed_plan = agent_plan
+                    #    st.rerun() # Rerun to show this plan
 
+                    # --- Display MongoDB Query ---
+                    mongo_query_from_state = event_state.get("mongo_query")
+                    if mongo_query_from_state and isinstance(mongo_query_from_state, str) and \
+                       mongo_query_from_state != st.session_state.last_displayed_mongo_query:
+                        query_display_text = f"🔍 MongoDB Query: `{mongo_query_from_state}`"
+                        st.session_state.messages.append({"role": "reasoning_thought", "content": query_display_text})
+                        st.session_state.last_displayed_mongo_query = mongo_query_from_state
+                        # st.rerun() # Rerun to show this query
 
-                    # --- Display New AIMessages ---
-                    # This section is now REMOVED as per user request to use final_response only.
-                    # current_graph_messages = event_state.get("messages", [])
-                    # new_messages_from_event = current_graph_messages[st.session_state.last_event_messages_count:]
-                    # 
-                    # for msg_from_graph in new_messages_from_event:
-                    #     if isinstance(msg_from_graph, AIMessage):
-                    #         st.session_state.messages.append({"role": "assistant", "content": msg_from_graph.content})
-                    # st.session_state.last_event_messages_count = len(current_graph_messages) # This still needs to be updated for context
-
-                    # Update last_event_messages_count for agent's context history tracking, even if not displaying AIMessages from here
+                    # Update last_event_messages_count for agent's context history tracking
                     current_graph_messages_for_history = event_state.get("messages", [])
                     st.session_state.last_event_messages_count = len(current_graph_messages_for_history)
 
