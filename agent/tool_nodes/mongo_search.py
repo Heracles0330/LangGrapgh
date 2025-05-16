@@ -72,7 +72,10 @@ def mongo_search(state: AgentState) -> AgentState:
         return
     
     # In a real implementation, you would execute the query asynchronously
-    results = asyncio.run(execute_mongo_query(mongo_query))
+    try:
+        results = asyncio.run(execute_mongo_query(mongo_query))
+        return {"mongo_results": results}
+    except Exception as e:
+        return {"mongo_results": []}
        
     
-    return {"mongo_results": results}

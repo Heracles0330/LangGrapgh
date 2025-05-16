@@ -1,314 +1,290 @@
 import streamlit as st
-from PIL import Image
 import uuid
-import os
-import time # For simulating streaming if needed
-import re
+from pathlib import Path
 
-# Set page config as the first Streamlit command
-st.set_page_config(layout="wide")
+# --- Page Configuration (Must be the first Streamlit command) ---
+st.set_page_config(page_title="Cheese Chatbot", layout="wide")
 
-# Attempt to import agent-specific modules
-try:
-    from agent.graph import create_agent_graph
-    from langgraph.types import Command, Interrupt
-    from langchain_core.messages import HumanMessage, AIMessage
-except ImportError as e:
-    st.error(f"Failed to import necessary agent modules: {e}. "
-             "Please ensure your agent code is accessible and all dependencies are installed.")
-    st.stop()
+# --- Agent and LangGraph Setup ---
+from agent.graph import agent_graph # Use your actual agent graph
+from langchain_core.messages import HumanMessage, AIMessage, BaseMessage # Import message types
+from langgraph.types import Command, Interrupt # Ensure Interrupt is available if needed for type checking, though not directly sent by UI
+from dotenv import load_dotenv
 
-# --- Configuration ---
-AGENT_NAME = "🧀 Cheese Shopping Assistant"
-AGENT_DESCRIPTION = """
-I am an AI assistant powered by LangGraph, here to help you with all your cheese-related queries!
-I can search our product database, and if needed, browse the web for more general information.
-Let me know what you're looking for!
-"""
-IMAGE_PATH = "agent_graph_mermaid_local.png" # Ensure this image exists in your project root
+load_dotenv() # Load environment variables if you have a .env file
 
-# --- Helper Functions ---
-def initialize_session_state():
-    """Initializes Streamlit session state variables."""
-    if "thread_id" not in st.session_state:
-        st.session_state.thread_id = str(uuid.uuid4())
-    if "messages" not in st.session_state:
-        st.session_state.messages = [] # Stores full chat history (HumanMessage, AIMessage)
-    if "agent_graph" not in st.session_state:
-        try:
-            st.session_state.agent_graph = create_agent_graph()
-        except Exception as e:
-            st.error(f"Failed to create agent graph: {e}")
-            st.session_state.agent_graph = None
-    if "current_thoughts" not in st.session_state:
-        st.session_state.current_thoughts = []
-    if "current_reason" not in st.session_state:
-        st.session_state.current_reason = ""
-    if "current_interrupt_message" not in st.session_state:
-        st.session_state.current_interrupt_message = None
-    if "current_interrupt_type" not in st.session_state:
-        st.session_state.current_interrupt_type = None
-    if "pending_user_action_for_interrupt" not in st.session_state:
-        st.session_state.pending_user_action_for_interrupt = False
-
-def reset_turn_specific_state():
-    """Resets state variables that are specific to a single agent turn's data."""
-    # These hold the data, the containers display it.
-    st.session_state.current_thoughts = []
-    st.session_state.current_reason = ""
-    # Don't reset interrupt message here, it's cleared after handling or on new query
-
-def display_sidebar():
-    """Displays the sidebar content."""
-    with st.sidebar:
-        st.title(AGENT_NAME)
-        st.markdown(AGENT_DESCRIPTION)
-        try:
-            if os.path.exists(IMAGE_PATH):
-                image = Image.open(IMAGE_PATH)
-                st.image(image, caption="Agent Architecture", use_container_width=True)
-            else:
-                st.warning(f"Graph image not found at {IMAGE_PATH}")
-        except Exception as e:
-            st.error(f"Could not load graph image: {e}")
-        
-        if st.button("New Conversation"):
-            st.session_state.messages = [] 
-            st.session_state.thread_id = str(uuid.uuid4())
-            reset_turn_specific_state() # Clear data
-            # Clear visual containers for thoughts/reasons for the new conversation
-            thought_container.empty() 
-            reason_container.empty()
-            interrupt_display_container.empty() # Also clear any lingering interrupt display
-            st.session_state.current_interrupt_message = None
-            st.session_state.pending_user_action_for_interrupt = False
-            st.session_state.current_interrupt_type = None
-            st.rerun()
+# --- Session State Initialization ---
+if "messages" not in st.session_state:
+    st.session_state.messages = [] # For UI display: List[Dict{"role": str, "content": str, ...}]
+if "thread_id" not in st.session_state:
+    st.session_state.thread_id = str(uuid.uuid4())
+if "interrupted_state" not in st.session_state:
+    st.session_state.interrupted_state = False
+if "current_config" not in st.session_state:
+    st.session_state.current_config = {"configurable": {"thread_id": st.session_state.thread_id}}
+if "last_config_for_carry_over" not in st.session_state:
+    st.session_state.last_config_for_carry_over = None
+# For actual agent state carry-over
+if "carried_over_messages_from_graph" not in st.session_state:
+    st.session_state.carried_over_messages_from_graph = [] # List[BaseMessage]
+if "current_thoughts_displayed" not in st.session_state:
+    st.session_state.current_thoughts_displayed = set()
+if "last_event_messages_count" not in st.session_state:
+    st.session_state.last_event_messages_count = 0
+if "active_interrupt_info" not in st.session_state: # To store details of an active interrupt
+    st.session_state.active_interrupt_info = None
+if "last_displayed_plan" not in st.session_state: # To track the last displayed plan
+    st.session_state.last_displayed_plan = []
 
 
-def display_chat_messages():
-    """Displays the chat history."""
-    for i, msg in enumerate(st.session_state.messages):
-        if msg["role"] == "user":
-            st.chat_message("user").markdown(msg["content"])
-        elif msg["role"] == "assistant":
-            # If it's a system notice, render it slightly differently or just as markdown
-            if msg["content"].startswith("**System Notice"):
-                st.chat_message("assistant").warning(msg["content"]) # Or .info()
-            else:
-                with st.chat_message("assistant"):
-                    render_markdown_with_interactive_images(msg["content"], f"chat_{i}")
-        elif msg["role"] == "system": # For "--- New Conversation Started ---" type messages
-             st.info(msg["content"])
-
-def render_markdown_with_interactive_images(markdown_content, unique_key_prefix):
-    """Renders markdown content. Text is passed to st.markdown. Images are rendered directly."""
-    parts = re.split(r'(!\[.*?\]\(.*?\))', markdown_content) 
-    for i, part in enumerate(parts):
-        if re.match(r'(!\[.*?\]\(.*?\))', part): 
-            alt_match = re.search(r'!\[(.*?)\]', part)
-            url_match = re.search(r'\((.*?)\)', part)
-            alt_text = alt_match.group(1) if alt_match else "image"
-            image_url = url_match.group(1) if url_match else None
-
-            if image_url:
-                st.image(image_url, caption=alt_text if alt_text else None, use_container_width='auto')
-            else:
-                st.markdown(part, unsafe_allow_html=True) 
-        else: 
-            if part.strip(): 
-                st.markdown(part, unsafe_allow_html=True)
-
-
-# --- Main Application ---
-initialize_session_state()
-
-# Define placeholders at the top level so they persist across reruns
-# These will be populated during agent streaming for the current turn.
-thought_container = st.empty()
-reason_container = st.empty()
-interrupt_display_container = st.empty()
-
-display_sidebar() # Sidebar can now also clear these containers via New Conversation button
-
-st.header("Chat with the Cheese Assistant")
-display_chat_messages()
-
-
-def handle_interrupt_input():
-    """Handles user input for an active interrupt."""
-    if st.session_state.current_interrupt_type == "clarification":
-        clarification_key = f"clarification_input_{st.session_state.thread_id}"
-        user_clarification = st.chat_input("Please provide clarification:", key=clarification_key)
-        if user_clarification:
-            st.session_state.messages.append({"role": "user", "content": f"(Clarification provided) {user_clarification}"})
-            st.session_state.pending_user_action_for_interrupt = False 
-            # Clear the specific interrupt prompt from display now that it's handled
-            interrupt_display_container.empty() 
-            return Command(resume={"data": user_clarification})
-            
-    elif st.session_state.current_interrupt_type == "web_search":
-        # For buttons, display them within the interrupt_display_container
-        with interrupt_display_container.container():
-            st.warning(st.session_state.current_interrupt_message) # Re-display message with buttons
-            col1, col2 = st.columns(2)
-            web_search_key_yes = f"web_search_yes_{st.session_state.thread_id}"
-            web_search_key_no = f"web_search_no_{st.session_state.thread_id}"
-            if col1.button("Yes, perform web search", key=web_search_key_yes):
-                st.session_state.messages.append({"role": "user", "content": "(User action: Yes, perform web search)"})
-                st.session_state.pending_user_action_for_interrupt = False 
-                interrupt_display_container.empty() 
-                return Command(resume={"data": "yes"})
-            if col2.button("No, do not search", key=web_search_key_no):
-                st.session_state.messages.append({"role": "user", "content": "(User action: No, do not search)"})
-                st.session_state.pending_user_action_for_interrupt = False 
-                interrupt_display_container.empty() 
-                return Command(resume={"data": "no"})
-    return None
-
-resume_command = None
-if st.session_state.pending_user_action_for_interrupt and not st.session_state.current_interrupt_type == "web_search":
-    # Only display generic warning if it's not web_search, as web_search handles its own display with buttons
-    with interrupt_display_container.container():
-        st.warning(st.session_state.current_interrupt_message)
-
-if st.session_state.pending_user_action_for_interrupt: # Call handle_interrupt_input if pending
-    resume_command = handle_interrupt_input()
-
-
-user_query = None
-if not st.session_state.pending_user_action_for_interrupt: # Only allow new query if no interrupt is active
-    query_input_key = f"query_input_{st.session_state.thread_id}"
-    user_query = st.chat_input("Ask something about cheese...", key=query_input_key)
-
-
-# Core agent interaction logic
-if resume_command or user_query:
+# --- Sidebar ---
+with st.sidebar:
+    st.title("🧀 Cheese Chatbot")
+    st.caption("Your AI assistant for all things cheese!")
+    
     try:
-        if st.session_state.agent_graph is None:
-            st.error("Agent graph is not initialized. Cannot process query.")
-            st.stop()
-
-        stream_input = None 
-        if user_query: 
-            st.session_state.messages.append({"role": "user", "content": user_query})
-            # Display the user query immediately
-            with st.chat_message("user"):
-                st.markdown(user_query)
-            
-            reset_turn_specific_state() # Clear previous turn's thought/reason data
-            # Clear visual containers for the new turn's thoughts/reasons
-            thought_container.empty() 
-            reason_container.empty()
-            # No need to clear interrupt_display_container here, it's for ongoing interrupts
-            
-            st.session_state.current_interrupt_message = None # Clear any previous interrupt data
-            st.session_state.pending_user_action_for_interrupt = False
-
-            graph_messages_history = []
-            # Prepare history, excluding the very last user message which is the current query
-            for m in st.session_state.messages[:-1]: 
-                if m["role"] == "user":
-                    graph_messages_history.append(HumanMessage(content=m["content"]))
-                elif m["role"] == "assistant":
-                    graph_messages_history.append(AIMessage(content=m["content"]))
-            
-            init_state = {
-                "query": user_query, 
-                "messages": graph_messages_history,
-                "needs_clarification": False, "reason": "", "suggested_clarifying_question": "",
-                "plan": [], "thought": [], "is_database_searched": False,
-                "searched_result": {}, "pinecone_results": [], "mongo_results": [],
-                "mongo_query": "", "pinecone_query": "", "is_result_sufficient": False,
-                "needs_web_search": False, "web_search_query": "", "web_search_results": [],
-                "final_response": ""
-            }
-            stream_input = init_state
-        elif resume_command: 
-            stream_input = resume_command
-            # Thoughts/reason from before interrupt will be displayed as they were.
-            # If new thoughts/reasons are generated after resume, they will append.
-            # No need to clear thought/reason containers on resume.
-            # interrupt_display_container is cleared when interrupt is handled.
-
-        config = {"configurable": {"thread_id": st.session_state.thread_id}}
-        
-        final_answer_placeholder = st.chat_message("assistant").empty()
-        
-        if stream_input is not None: 
-            # --- Agent Streaming ---
-            # accumulated_final_response_for_turn is used to build the response before adding to history
-            accumulated_final_response_for_turn = ""
-            
-            with st.spinner("🧀 Cheese Assistant is thinking..."):
-                for event_part_index, event in enumerate(st.session_state.agent_graph.stream(stream_input, config=config, stream_mode="values")):
-                    if "thought" in event and event["thought"]:
-                        new_thoughts = [t for t in event["thought"] if t not in st.session_state.current_thoughts]
-                        if new_thoughts:
-                            st.session_state.current_thoughts.extend(new_thoughts)
-                            with thought_container.container(): 
-                                 with st.expander("🤔 Agent Thoughts", expanded=True):
-                                    for t_content in st.session_state.current_thoughts: 
-                                        st.markdown(f"- {t_content}", help="Internal thought process of the agent.")
-
-                    if "reason" in event and event["reason"] and event["reason"] != st.session_state.current_reason:
-                        if "needs_clarification" in event: 
-                             st.session_state.current_reason = event["reason"]
-                             with reason_container.container(): 
-                                with st.expander("💡 Understanding Reason", expanded=True):
-                                    st.markdown(st.session_state.current_reason, help="Agent\'s reason from the understanding phase.")
-                    
-                    if "__interrupt__" in event:
-                        interrupt_info = event["__interrupt__"][0]
-                        st.session_state.current_interrupt_message = interrupt_info.value.get("message", "Agent needs input.")
-                        st.session_state.current_interrupt_type = interrupt_info.value.get("type", "unknown")
-                        st.session_state.pending_user_action_for_interrupt = True
-                        
-                        # Add interrupt message to chat history for display & update UI
-                        # Make sure it has a unique content to avoid issues if same interrupt happens twice
-                        interrupt_chat_content = f"**System Notice (requires your input):**\n{st.session_state.current_interrupt_message} (Ref: {uuid.uuid4().hex[:6]})"
-                        if not st.session_state.messages or st.session_state.messages[-1]["content"] != interrupt_chat_content:
-                            st.session_state.messages.append({"role": "assistant", "content": interrupt_chat_content})
-                        
-                        # Clear spinner before rerunning for interrupt
-                        # The spinner is outside the loop, clearing it via placeholder is not direct here.
-                        # Instead, the rerun will handle it. The spinner will only show if `is_agent_thinking` is true.
-                        # For now, let the rerun handle the spinner clearing by re-evaluating the page. 
-                        st.rerun() 
-                        break # Exit stream processing for this turn
-
-                    if "final_response" in event and event["final_response"]:
-                        accumulated_final_response_for_turn = event["final_response"]
-                        with final_answer_placeholder.container():
-                            render_markdown_with_interactive_images(accumulated_final_response_for_turn, f"final_stream_{event_part_index}")
-                        # Break after getting the final response if it's not chunked/streamed character by character
-                        # If your agent DOES stream final_response in chunks, this logic needs adjustment
-                        # For now, assume final_response is a complete message. Then break.
-                        break 
-
-            # After the streaming loop finishes or breaks (e.g. for final_response)
-            if accumulated_final_response_for_turn:
-                # Add to message history only if it's new
-                if not st.session_state.messages or st.session_state.messages[-1]["content"] != accumulated_final_response_for_turn:
-                    st.session_state.messages.append({"role": "assistant", "content": accumulated_final_response_for_turn})
-            
-            # If an interrupt was not handled (e.g. if break happened for final_response before interrupt section)
-            # and an interrupt IS pending, rerun to show interrupt UI.
-            if st.session_state.pending_user_action_for_interrupt:
-                st.rerun()
-            else: # Normal completion of a turn (final answer processed, no pending interrupt)
-                # The thoughts and reasons for THIS turn remain displayed.
-                # reset_turn_specific_state() was called at the START of new user query processing.
-                # We don't call it here to let the thoughts/reasons persist.
-                # Rerun to ensure UI is updated with the final message and state.
-                st.rerun() 
-
+        image_path = Path("agent_graph_mermaid_local.png") # Use the correct image name
+        if image_path.is_file():
+            st.image(str(image_path), caption="Agent Logic Flow", use_container_width=True)
+        else:
+            st.write("_(Agent graph image 'agent_graph_mermaid_local.png' not found)_\n")
     except Exception as e:
-        st.error(f"Error during agent execution: {e}")
-        reset_turn_specific_state() # Clear data
-        thought_container.empty()   # Clear display
-        reason_container.empty()    # Clear display
-        interrupt_display_container.empty()
+        st.error(f"Error loading image: {e}")
 
-elif not st.session_state.messages: 
-    st.info("Ask me something about our cheese products to get started!")
+    st.markdown("---")
+    if st.button("Clear Chat History"):
+        st.session_state.messages = []
+        st.session_state.interrupted_state = False
+        st.session_state.thread_id = str(uuid.uuid4()) 
+        st.session_state.current_config = {"configurable": {"thread_id": st.session_state.thread_id}}
+        st.session_state.last_config_for_carry_over = None
+        st.session_state.carried_over_messages_from_graph = []
+        st.session_state.current_thoughts_displayed = set()
+        st.session_state.last_event_messages_count = 0
+        st.session_state.active_interrupt_info = None
+        st.session_state.last_displayed_plan = [] # Reset on clear
+        st.rerun()
+
+# --- Main Chat Interface ---
+st.header("Chat with the Cheese Connoisseur")
+
+# Display chat messages
+for msg_idx, ui_message in enumerate(st.session_state.messages):
+    role = ui_message.get("role", "assistant") 
+    content = ui_message.get("content", "")
+    
+    with st.chat_message(role):
+        if role == "reasoning_thought":
+            st.markdown(f"🤔 *Thinking: {content}*")
+        elif role == "reasoning_interrupt":
+            st.markdown(f"⚠️ **Agent Action Required:** {content}")
+            if "reason" in ui_message:
+                 st.info(f"Reason: {ui_message['reason']}")
+            if "web_search_query" in ui_message:
+                 query_text = ui_message['web_search_query']
+                 st.warning(f"The agent proposes to search the web for: **{query_text}**")
+                 
+                 col1, col2, _ = st.columns([1,1,3]) # Create columns for buttons
+                 with col1:
+                    yes_key = f"web_search_yes_{msg_idx}"
+                    if st.button(f"✅ Yes, search", key=yes_key, help=f"Confirm search for: {query_text}"):
+                        st.session_state.user_input_for_agent = "yes"
+                        # No st.rerun() here, it's handled after the main input prompt logic
+                 with col2:
+                    no_key = f"web_search_no_{msg_idx}"
+                    if st.button(f"❌ No, skip", key=no_key, help="Decline web search"):
+                        st.session_state.user_input_for_agent = "no"
+                        # No st.rerun() here
+                 
+                 # If a button was clicked, user_input_for_agent is set.
+                 # The existing main st.rerun() at the end of the script will handle it.
+                 # We need to ensure the input field is not processed if a button is clicked
+                 # This is implicitly handled because if prompt is set by button, chat_input won't be.
+
+            # The generic input box will handle the user's response to other interrupts or text input
+        else: # user, assistant
+            st.markdown(content)
+
+
+# Handle user input and agent interaction
+user_responded_to_button = False
+if "user_input_for_agent" in st.session_state and st.session_state.user_input_for_agent: # For button clicks
+    prompt = st.session_state.user_input_for_agent
+    st.session_state.user_input_for_agent = None 
+    user_responded_to_button = True # Mark that input came from a button
+else:
+    # Only show chat_input if not currently handling a button response AND agent is not interrupted waiting for specific button
+    # Or, more simply, always show chat_input but prioritize button input.
+    # The `user_responded_to_button` flag helps to avoid processing chat_input if a button was just clicked.
+    prompt = st.chat_input("Ask about cheese or respond to the agent...")
+
+if prompt: # This will be true if chat_input has value OR if a button set the prompt
+    if not user_responded_to_button: # If input is from chat_input, display it as user message
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"): 
+            st.markdown(prompt)
+    # Else (if user_responded_to_button), 'prompt' is "yes" or "no". 
+    # We still want to send this to the agent, but we've already handled the user message part
+    # by not re-displaying "yes" or "no" as a separate user chat bubble.
+    # The "Resuming with input..." thought will indicate what's being sent.
+
+    st.session_state.current_thoughts_displayed = set() 
+    st.session_state.last_event_messages_count = 0 
+    # Don't reset last_displayed_plan here, only if it changes in the stream or on full clear.
+
+    with st.spinner("Cheese bot is thinking..."):
+        try:
+            events_iterable = None
+            if st.session_state.interrupted_state:
+                actual_command = Command(resume={"data": prompt}) 
+                
+                st.session_state.messages.append({
+                    "role": "reasoning_thought", 
+                    "content": f"Resuming with input: '{prompt}'"
+                })
+                
+                events_iterable = agent_graph.stream(
+                    actual_command,
+                    config=st.session_state.current_config,
+                    stream_mode="values"
+                )
+                st.session_state.interrupted_state = False 
+                st.session_state.active_interrupt_info = None
+
+            else: # New conversation flow
+                st.session_state.last_config_for_carry_over = st.session_state.current_config.copy()
+                
+                new_thread_id = str(uuid.uuid4())
+                st.session_state.thread_id = new_thread_id
+                st.session_state.current_config = {"configurable": {"thread_id": new_thread_id}}
+                
+                # --- Message Carry-Over ---
+                st.session_state.carried_over_messages_from_graph = [] # Reset
+                if st.session_state.last_config_for_carry_over:
+                    try:
+                        previous_state_snapshot = agent_graph.get_state(st.session_state.last_config_for_carry_over)
+                        if previous_state_snapshot and previous_state_snapshot.values:
+                            retrieved_messages = previous_state_snapshot.values.get("messages", [])
+                            if retrieved_messages: # retrieved_messages are List[BaseMessage]
+                                st.session_state.carried_over_messages_from_graph = [m for m in retrieved_messages if isinstance(m, BaseMessage)]
+                                st.session_state.messages.append({
+                                    "role": "reasoning_thought", 
+                                    "content": f"Carried over {len(st.session_state.carried_over_messages_from_graph)} messages from previous interaction (Thread ID: ...{st.session_state.last_config_for_carry_over.get('configurable',{}).get('thread_id', '')[-6:]})."
+                                })
+                    except Exception as e:
+                        st.warning(f"Info: Could not retrieve state from previous session ({st.session_state.last_config_for_carry_over.get('configurable',{}).get('thread_id', '')[-6:]}): {e}. Starting fresh.")
+                        st.session_state.carried_over_messages_from_graph = []
+                
+                init_state = {
+                    "query": prompt, # Current user query
+                    "messages": st.session_state.carried_over_messages_from_graph, # List[BaseMessage]
+                    "needs_clarification": False, # Defaults for a new run
+                    "reason": "",
+                    "suggested_clarifying_question": "",
+                    "plan": [],
+                    "thought": [],
+                    "is_database_searched": False,
+                    "searched_result": {},
+                    "pinecone_results": [],
+                    "mongo_results": [],
+                    "mongo_query": "",
+                    "pinecone_query": "",
+                    "is_result_sufficient": False,
+                    "needs_web_search": False,
+                    "web_search_query": ""
+                }
+                events_iterable = agent_graph.stream(
+                    init_state,
+                    config=st.session_state.current_config,
+                    stream_mode="values"
+                )
+
+            # --- Process events from the stream ---
+            if events_iterable:
+                for event_idx, event_state in enumerate(events_iterable): # event_state is AgentState
+                    # --- Handle Interrupts ---
+                    if "__interrupt__" in event_state:
+                        interrupt_obj = event_state["__interrupt__"][0] # This is an Interrupt object
+                        interrupt_value = interrupt_obj.value # This is the dictionary payload
+
+                        interrupt_message_content = interrupt_value.get("message", "Interruption: Agent requires input.")
+                        clarification_reason = interrupt_value.get("reason")
+                        suggested_question = interrupt_value.get("suggested_clarifying_question")
+                        web_search_query = interrupt_value.get("web_search_query")
+                        
+                        st.session_state.active_interrupt_info = interrupt_value # Store for context
+
+                        ui_interrupt_msg = {"role": "reasoning_interrupt", "content": interrupt_message_content}
+                        
+                        if suggested_question: # Prefer suggested_question if available for clarification
+                             ui_interrupt_msg["reason"] = suggested_question
+                        elif clarification_reason:
+                             ui_interrupt_msg["reason"] = clarification_reason
+                        
+                        if web_search_query:
+                            ui_interrupt_msg["web_search_query"] = web_search_query
+                        
+                        st.session_state.messages.append(ui_interrupt_msg)
+                        st.session_state.interrupted_state = True
+                        break # Stop processing further events on interrupt
+
+                    # --- Display Agent Thoughts (List[str]) ---
+                    agent_thoughts = event_state.get("thought", []) 
+                    if agent_thoughts:
+                        # Display only the latest new thought to avoid clutter if thoughts are cumulative
+                        latest_thought = agent_thoughts[-1] if agent_thoughts else None
+                        if latest_thought and latest_thought not in st.session_state.current_thoughts_displayed:
+                            st.session_state.messages.append({"role": "reasoning_thought", "content": latest_thought})
+                            st.session_state.current_thoughts_displayed.add(latest_thought)
+
+                    # --- Display Agent Plan (List[str]) ---
+                    agent_plan = event_state.get("plan", [])
+                    if agent_plan and st.session_state.get("last_displayed_plan") != agent_plan:
+                       plan_text = "📝 **Devising a plan:**\n" + "\n".join([f"  - {step}" for step in agent_plan])
+                       st.session_state.messages.append({"role": "reasoning_thought", "content": plan_text})
+                       st.session_state.last_displayed_plan = agent_plan
+
+
+                    # --- Display New AIMessages ---
+                    # event_state["messages"] contains List[BaseMessage]
+                    current_graph_messages = event_state.get("messages", [])
+                    new_messages_from_event = current_graph_messages[st.session_state.last_event_messages_count:]
+                    
+                    for msg_from_graph in new_messages_from_event:
+                        if isinstance(msg_from_graph, AIMessage):
+                            st.session_state.messages.append({"role": "assistant", "content": msg_from_graph.content})
+                        # HumanMessages are added when user types, SystemMessages could be handled if needed
+                    st.session_state.last_event_messages_count = len(current_graph_messages)
+
+                    # --- Display Clarification Info (if not leading to an immediate interrupt shown above) ---
+                    # This might be redundant if all clarifications cause an interrupt that's already handled.
+                    if event_state.get("needs_clarification") and not st.session_state.interrupted_state:
+                        reason = event_state.get("reason","")
+                        question = event_state.get("suggested_clarifying_question","")
+                        # Avoid displaying if it's already part of an active interrupt message
+                        if not (st.session_state.active_interrupt_info and \
+                           (st.session_state.active_interrupt_info.get("reason") == reason or \
+                            st.session_state.active_interrupt_info.get("suggested_clarifying_question") == question)):
+                            
+                            if reason or question:
+                                clar_text_parts = ["The agent requires clarification."]
+                                if reason: clar_text_parts.append(f"Reason: {reason}")
+                                if question: clar_text_parts.append(f"Question: {question}")
+                                # Display as a thought or a distinct system message
+                                st.session_state.messages.append({"role": "reasoning_thought", "content": " ".join(clar_text_parts)})
+                    
+                    # Final response check from state (if your agent populates this field)
+                    final_response_from_state = event_state.get("final_response")
+                    if final_response_from_state and isinstance(final_response_from_state, str):
+                        # Ensure this isn't a duplicate of the last AIMessage
+                        if not st.session_state.messages or st.session_state.messages[-1].get("content") != final_response_from_state or st.session_state.messages[-1].get("role") != "assistant":
+                            st.session_state.messages.append({"role": "assistant", "content": final_response_from_state})
+
+
+        except Exception as e:
+            st.error(f"An error occurred while interacting with the agent: {e}")
+            st.session_state.messages.append({"role": "assistant", "content": f"Sorry, an error occurred: {str(e)}"})
+            # Potentially reset interrupt state if error is critical
+            # st.session_state.interrupted_state = False 
+
+    st.rerun() # Rerun to display new messages and update UI state
